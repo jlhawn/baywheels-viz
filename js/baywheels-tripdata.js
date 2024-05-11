@@ -201,7 +201,7 @@ class Station {
 }
 
 document.addEventListener('DOMContentLoaded', function() {
-    var map = L.map('map').setView([37.82, -122.27], 14); // Coordinates for Oakland
+    let map = L.map('map').setView([37.82, -122.27], 14); // Coordinates for Oakland
 
     // Add CartoDB Positron tiles
     L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}.png', {
@@ -209,21 +209,25 @@ document.addEventListener('DOMContentLoaded', function() {
         attribution: '© OpenStreetMap contributors, © CARTO'
     }).addTo(map);
 
-    var markers_layer = new L.LayerGroup().addTo(map);
+    let markers_layer = new L.LayerGroup().addTo(map);
 
     // Fetch the JSON data for stations
     fetch('data/prepared/202404-baywheels-tripdata.json')
     .then(response => response.json())
     .then(data => {
-        var stations = new Map();
+        let stations = new Map();
 
         data.stations.forEach(function(stn) {
-            var station = new Station(stn.id, stn.name, stn.lat, stn.lng, markers_layer, new L.LayerGroup().addTo(map));
+            let station = new Station(stn.id, stn.name, stn.lat, stn.lng, markers_layer, new L.LayerGroup().addTo(map));
             stations.set(station.id, station);
         });
 
+        let longest_trip = null;
         data.aggregated_trips.forEach(function(trip_data) {
-            new Trips(stations, trip_data);
+            let trip = new Trips(stations, trip_data);
+            if (!longest_trip || trip.distance > longest_trip.distance) {
+                longest_trip = trip;
+            }
         });
     });
 });
