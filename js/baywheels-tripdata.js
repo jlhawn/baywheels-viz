@@ -42,12 +42,75 @@ class Trips {
     constructor(stations_by_id, trip_data) {
         this.start_station = stations_by_id.get(trip_data.start_station_id);
         this.end_station = stations_by_id.get(trip_data.end_station_id);
+
+        this.distance = this.start_station.point.distanceTo(this.end_station.point) / 1000; // Distance in kilometers.
+
         this.trip_counts = new TripCounts(trip_data.trip_counts);
 
         this.is_round_trip = this.start_station.id === this.end_station.id;
 
         this.start_station.add_starting_trips(this);
         this.end_station.add_ending_trips(this);
+    }
+
+    display(map_layer) {
+        if (this.is_round_trip) { return; }
+
+        let lineColor = "#CE0099";
+        let lineWeight = Math.max(2, 2*Math.pow(this.trip_counts.total, 1/3)); // Scale line weight as cube of trips.
+        let lineOpacity = 0.6;
+
+        let polyline = L.polyline([this.start_station.point, this.end_station.point], {
+            color: lineColor,
+            opacity: lineOpacity,
+            weight: lineWeight
+        });
+
+        // Adding arrows to the polyline
+        let decorator = L.polylineDecorator(polyline, {
+            patterns: [{
+                offset: '100%',
+                repeat: 1,
+                symbol: L.Symbol.arrowHead({
+                    pixelSize: 8,
+                    polygon: false,
+                    pathOptions: {
+                        stroke: true,
+                        color: '#CE0099', // Example: Red color for the arrowhead
+                        opacity: lineOpacity,
+                        weight: lineWeight
+                    }
+                })
+            }]
+        });
+
+        // Display aggregate ride count data on hover.
+        let popupContent = `
+            <h4>${this.start_station.name} -> ${this.end_station.name}</h4>
+            <strong>Total Trips:</strong> ${this.trip_counts.total}<br />
+            <strong>Distance:</strong> ${this.distance.toFixed(2)} km<br />
+            <ul>
+                <li>Classic Bike trips: ${this.trip_counts.by_ride_type.classic_bike}</li>
+                <li>Electric Bike trips: ${this.trip_counts.by_ride_type.electric_bike}</li>
+                <li>Member trips: ${this.trip_counts.by_member_type.member}</li>
+                <li>Non-member trips: ${this.trip_counts.by_member_type.casual}</li>
+                <li>Member trips on Classic Bike: ${this.trip_counts.by_ride_type_and_member_type.classic_bike.member}</li>
+                <li>Member trips on Electric Bike: ${this.trip_counts.by_ride_type_and_member_type.electric_bike.member}</li>
+                <li>Non-member trips on Classic Bike: ${this.trip_counts.by_ride_type_and_member_type.classic_bike.casual}</li>
+                <li>Non-member trips on Electirc Bike: ${this.trip_counts.by_ride_type_and_member_type.electric_bike.casual}</li>
+            </ul>
+        `.trim();
+
+        let popup = 
+
+        polyline.bindPopup(popupContent);
+
+        polyline.on('click', function(e) {
+            e.target.openPopup();
+        });
+
+        map_layer.addLayer(polyline);
+        map_layer.addLayer(decorator);
     }
 }
 
@@ -60,16 +123,15 @@ var customMarker = L.icon({
 });
 
 class Station {
-    constructor(id, name, lat, lng, map) {
+    constructor(id, name, lat, lng, markers_layer, station_trips_layer) {
         this.id = id;
         this.name = name;
         this.lat = parseFloat(lat);
         this.lng = parseFloat(lng);
+        this.point = new L.LatLng(this.lat, this.lng);
 
-        this.map = map;
-
-        this.lines = [];
-        this.decorators = [];
+        this.display_mode = 0;
+        this.trips_layer = station_trips_layer;
 
         this.trips_starting_here = [];
         this.trips_ending_here = [];
@@ -83,10 +145,9 @@ class Station {
 
         // Bind events for hover popup and click.
         this.marker.on('mouseover', () => this.marker.openPopup() );
-        this.marker.on('mouseout', () => this.marker.closePopup() );
         this.marker.on('click', () => this.toggleDisplayTrips() );
 
-        this.marker.addTo(map);
+        markers_layer.addLayer(this.marker);
     }
 
     add_starting_trips(trips) {
@@ -105,51 +166,36 @@ class Station {
     createPopupContent() {
         return `
             <h3>${this.name}</h3>
-            <ul>
-                <li><b>Trips starting here:</b> ${this.combined_starting_trip_counts.total}</li>
-                <li><b>Trips ending here:</b> ${this.combined_ending_trip_counts.total}</li>
-                <li><b>Round trips:</b> ${this.round_trip_count}</li>
-            </ul>`.trim();
+            <strong>Trips starting here:</strong> ${this.combined_starting_trip_counts.total}<br />
+            <strong>Trips ending here:</strong> ${this.combined_ending_trip_counts.total}<br />
+            <strong>Round trips:</strong> ${this.round_trip_count}<br />
+        `.trim();
     }
 
     toggleDisplayTrips() {
-        // Clear existing lines
-        if (this.lines.length > 0) {
-            this.lines.forEach(line => line.remove());
-            this.decorators.forEach(decorator => decorator.remove());
-            this.lines = [];
-            this.decorators = [];
-            return;
+        // Clear any existing trips displayed.
+        this.trips_layer.clearLayers();
+
+        // 0 -> off, 1 -> trips_out, 2 -> trips_in
+        this.display_mode = (this.display_mode + 1) % 3
+        switch (this.display_mode) {
+        case 1:
+            return this.display_trips_out();
+        case 2:
+            return this.display_trips_in();
         }
+    }
 
-        // Draw new lines for trips starting from this station
-        this.trips_starting_here.forEach(trip => {
-            if (trip.is_round_trip) { return; }
+    display_trips_out() {
+        this.display_trips(this.trips_starting_here);
+    }
 
-            let destination = trip.end_station;
-            let pointA = new L.LatLng(this.lat, this.lng);
-            let pointB = new L.LatLng(destination.lat, destination.lng);
-            let lineColor = "#523BE4";
-            let lineWeight = Math.max(1, trip.trip_counts.total / 10); // Scale line weight
+    display_trips_in() {
+        this.display_trips(this.trips_ending_here);
+    }
 
-            let polyline = L.polyline([pointA, pointB], {
-                color: lineColor,
-                weight: lineWeight
-            });
-
-            // Adding arrows to the polyline
-            let decorator = L.polylineDecorator(polyline, {
-                patterns: [
-                    {offset: '100%', repeat: 0, symbol: L.Symbol.arrowHead({pixelSize: 15, polygon: false, pathOptions: {stroke: true}})}
-                ]
-            });
-
-            polyline.addTo(this.map);
-            decorator.addTo(this.map);
-
-            this.lines.push(polyline);
-            this.decorators.push(decorator);
-        });
+    display_trips(trips) {
+        trips.forEach(trip => trip.display(this.trips_layer));
     }
 
 }
@@ -163,6 +209,8 @@ document.addEventListener('DOMContentLoaded', function() {
         attribution: '© OpenStreetMap contributors, © CARTO'
     }).addTo(map);
 
+    var markers_layer = new L.LayerGroup().addTo(map);
+
     // Fetch the JSON data for stations
     fetch('data/prepared/202404-baywheels-tripdata.json')
     .then(response => response.json())
@@ -170,7 +218,7 @@ document.addEventListener('DOMContentLoaded', function() {
         var stations = new Map();
 
         data.stations.forEach(function(stn) {
-            var station = new Station(stn.id, stn.name, stn.lat, stn.lng, map);
+            var station = new Station(stn.id, stn.name, stn.lat, stn.lng, markers_layer, new L.LayerGroup().addTo(map));
             stations.set(station.id, station);
         });
 
