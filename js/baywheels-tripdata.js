@@ -57,7 +57,7 @@ class Trips {
         if (this.is_round_trip) { return; }
 
         let lineColor = "#CE0099";
-        let lineWeight = Math.max(2, 2*Math.pow(this.trip_counts.total, 1/3)); // Scale line weight as cube of trips.
+        let lineWeight = Math.max(2, 2*Math.pow(this.trip_counts.total, 1/Math.E)); // Scale line weight as cube of trips.
         let lineOpacity = 0.6;
 
         let polyline = L.polyline([this.start_station.point, this.end_station.point], {
@@ -85,23 +85,21 @@ class Trips {
         });
 
         // Display aggregate ride count data on hover.
-        let popupContent = `
-            <h4>${this.start_station.name} -> ${this.end_station.name}</h4>
-            <strong>Total Trips:</strong> ${this.trip_counts.total}<br />
-            <strong>Distance:</strong> ${this.distance.toFixed(2)} km<br />
-            <ul>
-                <li>Classic Bike trips: ${this.trip_counts.by_ride_type.classic_bike}</li>
-                <li>Electric Bike trips: ${this.trip_counts.by_ride_type.electric_bike}</li>
-                <li>Member trips: ${this.trip_counts.by_member_type.member}</li>
-                <li>Non-member trips: ${this.trip_counts.by_member_type.casual}</li>
-                <li>Member trips on Classic Bike: ${this.trip_counts.by_ride_type_and_member_type.classic_bike.member}</li>
-                <li>Member trips on Electric Bike: ${this.trip_counts.by_ride_type_and_member_type.electric_bike.member}</li>
-                <li>Non-member trips on Classic Bike: ${this.trip_counts.by_ride_type_and_member_type.classic_bike.casual}</li>
-                <li>Non-member trips on Electirc Bike: ${this.trip_counts.by_ride_type_and_member_type.electric_bike.casual}</li>
-            </ul>
-        `.trim();
-
-        let popup = 
+        let popupContent = tag.div(
+            tag.h4(`${this.start_station.name} -> ${this.end_station.name}`),
+            tag.strong('Total Trips'), ` ${this.trip_counts.total}`, tag.br(),
+            tag.strong('Total Trips'), ` ${this.distance.toFixed(2)} km`, tag.br(),
+            tag.ul(
+                tag.li(`Classic Bike trips: ${this.trip_counts.by_ride_type.classic_bike}`),
+                tag.li(`Electric Bike trips: ${this.trip_counts.by_ride_type.electric_bike}`),
+                tag.li(`Member trips: ${this.trip_counts.by_member_type.member}`),
+                tag.li(`Non-member trips: ${this.trip_counts.by_member_type.casual}`),
+                tag.li(`Member trips on Classic Bike: ${this.trip_counts.by_ride_type_and_member_type.classic_bike.member}`),
+                tag.li(`Member trips on Electric Bike: ${this.trip_counts.by_ride_type_and_member_type.electric_bike.member}`),
+                tag.li(`Non-member trips on Classic Bike: ${this.trip_counts.by_ride_type_and_member_type.classic_bike.casual}`),
+                tag.li(`Non-member trips on Electirc Bike: ${this.trip_counts.by_ride_type_and_member_type.electric_bike.casual}`),
+            ),
+        );
 
         polyline.bindPopup(popupContent);
 
@@ -123,6 +121,10 @@ var customMarker = L.icon({
 });
 
 class Station {
+    static DISPLAY_MODE_NONE = "NONE"
+    static DISPLAY_MODE_STARTING = "STARTING"
+    static DISPLAY_MODE_ENDING = "ENDING"
+
     constructor(id, name, lat, lng, markers_layer, station_trips_layer) {
         this.id = id;
         this.name = name;
@@ -130,12 +132,16 @@ class Station {
         this.lng = parseFloat(lng);
         this.point = new L.LatLng(this.lat, this.lng);
 
-        this.display_mode = 0;
+        this.display_mode = Station.DISPLAY_MODE_NONE;
         this.trips_layer = station_trips_layer;
 
         this.trips_starting_here = [];
         this.trips_ending_here = [];
+        this.max_starting_trip_count = 0;
+        this.max_ending_trip_count = 0;
         this.round_trip_count = 0;
+
+        this.trip_display_min_count = 0;
 
         this.combined_starting_trip_counts = new TripCounts();
         this.combined_ending_trip_counts = new TripCounts();
@@ -145,7 +151,6 @@ class Station {
 
         // Bind events for hover popup and click.
         this.marker.on('mouseover', () => this.marker.openPopup() );
-        this.marker.on('click', () => this.toggleDisplayTrips() );
 
         markers_layer.addLayer(this.marker);
     }
@@ -153,6 +158,9 @@ class Station {
     add_starting_trips(trips) {
         this.trips_starting_here.push(trips);
         this.combined_starting_trip_counts.add(trips.trip_counts);
+        if (!trips.is_round_trip && trips.trip_counts.total > this.max_starting_trip_count) {
+            this.max_starting_trip_count = trips.trip_counts.total;
+        }
     }
 
     add_ending_trips(trips) {
@@ -160,29 +168,121 @@ class Station {
         this.combined_ending_trip_counts.add(trips.trip_counts);
         if (trips.is_round_trip) {
             this.round_trip_count += trips.trip_counts.total;
+        } else if (trips.trip_counts.total > this.max_ending_trip_count) {
+            this.max_ending_trip_count = trips.trip_counts.total;
         }
     }
 
     createPopupContent() {
-        return `
-            <h3>${this.name}</h3>
-            <strong>Trips starting here:</strong> ${this.combined_starting_trip_counts.total}<br />
-            <strong>Trips ending here:</strong> ${this.combined_ending_trip_counts.total}<br />
-            <strong>Round trips:</strong> ${this.round_trip_count}<br />
-        `.trim();
+        return tag.div(
+            tag.h3(this.name),
+            tag.strong('Trips starting here'), `: ${this.combined_starting_trip_counts.total}`, tag.br(),
+            tag.strong('Trips ending here'), `: ${this.combined_ending_trip_counts.total}`, tag.br(),
+            tag.strong('Round trips'), `: ${this.round_trip_count}`, tag.br(),
+            this.createTripDisplayForm(),
+        );
+    }
+
+    createTripDisplayForm() {
+        let minCountInput = tag.input({attrs: {
+            type: 'number',
+            id: `${this.id}_trip-display-filter-min-count`,
+            name: 'filter-min-count',
+            value: this.trip_display_min_count,
+            min: 1, max: this.maxTripsForCurrentDisplayMode(),
+        }});
+        let displayNoneInput = tag.input({attrs: {
+            type: 'radio',
+            id: `${this.id}_trip-display-choice-none`,
+            name: 'mode', value: 'none',
+        }});
+        let displayStartingInput = tag.input({attrs: {
+            type: 'radio', id: `${this.id}_trip-display-choice-starting`,
+            name: 'mode', value: 'starting'
+        }});
+        let displayEndingInput = tag.input({attrs: {
+            type: 'radio', id: `${this.id}_trip-display-choice-ending`,
+            name: 'mode', value: 'ending-here'
+        }});
+
+        // Make sure one of the radio inputs is checked.
+        let checkedRadio = displayNoneInput;
+        switch (this.display_mode) {
+        case Station.DISPLAY_MODE_STARTING:
+            checkedRadio = displayStartingInput;
+            break;
+        case Station.DISPLAY_MODE_ENDING:
+            checkedRadio = displayEndingInput;
+            break;
+        default:
+            minCountInput.setAttribute('disabled', '');
+        }
+        checkedRadio.setAttribute('checked', '');
+
+        for (let [radioInput, mode] of [
+            [displayNoneInput, Station.DISPLAY_MODE_NONE],
+            [displayStartingInput, Station.DISPLAY_MODE_STARTING],
+            [displayEndingInput, Station.DISPLAY_MODE_ENDING],
+        ]) {
+            radioInput.addEventListener('change', (e) => {
+                if (e.target.checked) {
+                    this.display_mode = mode;
+                    let maxTrips = this.maxTripsForCurrentDisplayMode();
+                    if (maxTrips === 0) {
+                        minCountInput.setAttribute('disabled', '');
+                    } else {
+                        minCountInput.removeAttribute('disabled');
+                        minCountInput.setAttribute('max', maxTrips);
+                    }
+                    this.toggleDisplayTrips();
+                }
+            });
+        }
+
+        minCountInput.addEventListener('change', (e) => {
+            this.trip_display_min_count = e.target.value;
+            this.toggleDisplayTrips();
+        });
+
+        return tag.form(
+            tag.fieldset(
+                tag.legend(tag.strong('Trip Display')),
+                tag.div(
+                    displayNoneInput,
+                    tag.label({attrs: {for: `${this.id}_trip-display-choice-none`}}, 'None'),
+                    displayStartingInput,
+                    tag.label({attrs: {for: `${this.id}_trip-display-choice-starting`}}, 'Starting Here'),
+                    displayEndingInput,
+                    tag.label({attrs: {for: `${this.id}_trip-display-choice-ending`}}, 'Ending Here'),
+                    tag.hr(),
+                    tag.em('Only show routes with at least '),
+                    minCountInput,
+                    tag.em(' trips.'),
+                ),
+            )
+        );
     }
 
     toggleDisplayTrips() {
         // Clear any existing trips displayed.
         this.trips_layer.clearLayers();
 
-        // 0 -> off, 1 -> trips_out, 2 -> trips_in
-        this.display_mode = (this.display_mode + 1) % 3
         switch (this.display_mode) {
-        case 1:
+        case Station.DISPLAY_MODE_STARTING:
             return this.display_trips_out();
-        case 2:
+        case Station.DISPLAY_MODE_ENDING:
             return this.display_trips_in();
+        }
+    }
+
+    maxTripsForCurrentDisplayMode() {
+        switch (this.display_mode) {
+        case Station.DISPLAY_MODE_STARTING:
+            return this.max_starting_trip_count;
+        case Station.DISPLAY_MODE_ENDING:
+            return this.max_ending_trip_count;
+        default:
+            return 0;
         }
     }
 
@@ -195,7 +295,11 @@ class Station {
     }
 
     display_trips(trips) {
-        trips.forEach(trip => trip.display(this.trips_layer));
+        trips.forEach(trip => {
+            if (trip.trip_counts.total >= this.trip_display_min_count) {
+                trip.display(this.trips_layer);
+            }
+        });
     }
 
 }

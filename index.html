@@ -8,12 +8,39 @@
     <style>
         body, html { height: 100%; margin: 0; }
         #map { height: 100%; }
+        fieldset {
+            margin-top: 1em;
+            border: 1px solid #cecece;
+            border-radius: 8px;
+        }
+        fieldset hr {
+            border-width: 1px 0 0 0;
+            border-style: solid;
+            border-color: #cecece;
+        }
+        input[type=radio] {
+            appearance: none;
+            border: 2px solid #523be4;
+            width: 12px;
+            height: 12px;
+            border-radius: 8px;
+        }
+        input[type=radio]:checked {
+            border: 4px solid #523be4;
+        }
+        input[type=number] {
+            width: auto;
+        }
+        label {
+            margin-right: auto;
+        }
     </style>
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-polylinedecorator/dist/leaflet.polylineDecorator.js"></script>
+    <script src="js/tag.js"></script>
+    <script src="js/baywheels-tripdata.js"></script>
 </head>
 <body>
     <div id="map"></div>
-    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-    <script src="https://unpkg.com/leaflet-polylinedecorator/dist/leaflet.polylineDecorator.js"></script>
-    <script src="js/baywheels-tripdata.js"></script>
 </body>
 </html>
