@@ -141,7 +141,7 @@ class Station {
         this.max_ending_trip_count = 0;
         this.round_trip_count = 0;
 
-        this.trip_display_min_count = 0;
+        this.trip_display_min_count = 1;
 
         this.combined_starting_trip_counts = new TripCounts();
         this.combined_ending_trip_counts = new TripCounts();
